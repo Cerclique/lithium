@@ -1,7 +1,10 @@
-use lithium::{Logger, debug, error, info, trace, warn};
+use lithium::{LevelFilter, LoggerBuilder, debug, error, info, trace, warn};
 
 fn main() {
-    let logger = Logger::new();
+    let logger = LoggerBuilder::new()
+        .level(LevelFilter::Debug)
+        .color(true)
+        .build();
 
     logger.init().expect("logger init failed");
 
