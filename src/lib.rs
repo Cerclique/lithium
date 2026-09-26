@@ -14,8 +14,9 @@ use thiserror::Error;
 /// [`thiserror`]: https://docs.rs/thiserror
 #[derive(Debug, Error)]
 pub enum LoggerError {
-    /// Returned when [`Logger::init`] is called on an instance that has already
-    /// been initialized. The logger can be initialized exactly once per instance.
+    /// Returned when [`Logger::init`] is called on an instance that has
+    /// already been initialized. A failed initialization does not mark the
+    /// instance as initialized, so it may be retried.
     #[error("logger already initialized")]
     AlreadyInitialized,
 
@@ -168,8 +169,9 @@ impl Logger {
     /// If `env_logger` has already been initialized globally (for example by
     /// another crate or test), this method returns [`LoggerError::InitError`].
     ///
-    /// If this method is called a second time on the same instance, it returns
-    /// [`LoggerError::AlreadyInitialized`].
+    /// If this method is called again on the same instance after a successful
+    /// initialization, it returns [`LoggerError::AlreadyInitialized`]. A failed
+    /// attempt does not mark the instance as initialized, so it may be retried.
     ///
     /// [`LoggerError::AlreadyInitialized`]: LoggerError::AlreadyInitialized
     /// [`LoggerError::InitError`]: LoggerError::InitError
@@ -209,7 +211,13 @@ impl Logger {
             }
         });
 
-        builder.try_init()?;
+        if let Err(err) = builder.try_init() {
+            // The global initialization failed; release the claim so the
+            // instance can be retried instead of being permanently stuck
+            // behind `AlreadyInitialized`.
+            self.initialized.store(false, Ordering::Release);
+            return Err(LoggerError::InitError(err));
+        }
 
         Ok(())
     }
@@ -258,9 +266,45 @@ mod tests {
     fn test_multiple_initializations() {
         let logger = LoggerBuilder::new().build();
 
-        let _ = logger.init();
+        let first = logger.init();
         let result = logger.init();
-        assert!(matches!(result, Err(LoggerError::AlreadyInitialized)));
+
+        if first.is_ok() {
+            // A successful init claims the instance permanently.
+            assert!(
+                matches!(result, Err(LoggerError::AlreadyInitialized)),
+                "expected AlreadyInitialized, got {result:?}"
+            );
+        } else {
+            // A failed init leaves the instance retryable.
+            assert!(
+                matches!(result, Err(LoggerError::InitError(_))),
+                "expected InitError, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_failed_init_is_retryable() {
+        // Claim the global logger first so the init below deterministically
+        // fails, regardless of what parallel tests have done.
+        let claimant = LoggerBuilder::new().build();
+        let _ = claimant.init();
+
+        let logger = LoggerBuilder::new().build();
+        let first = logger.init();
+        assert!(
+            matches!(first, Err(LoggerError::InitError(_))),
+            "expected InitError, got {first:?}"
+        );
+
+        // A failed init must not leave the instance stuck behind
+        // `AlreadyInitialized`; the retry should surface the original error.
+        let second = logger.init();
+        assert!(
+            matches!(second, Err(LoggerError::InitError(_))),
+            "failed init should be retryable, got {second:?}"
+        );
     }
 
     #[test]
