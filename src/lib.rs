@@ -30,6 +30,32 @@ pub enum LoggerError {
 }
 
 // ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+/// Configuration options for a [`Logger`].
+///
+/// Holds the settings chosen at build time: log level and color output.
+/// Created by [`LoggerBuilder`] and carried into [`Logger`].
+///
+/// [`Logger`]: struct.Logger.html
+/// [`LoggerBuilder`]: struct.LoggerBuilder.html
+#[derive(Clone)]
+struct LoggerConfig {
+    level: LevelFilter,
+    color: bool,
+}
+
+impl Default for LoggerConfig {
+    fn default() -> Self {
+        Self {
+            level: LevelFilter::Info,
+            color: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------
 
@@ -57,8 +83,7 @@ pub enum LoggerError {
 /// [`color`]: #method.color
 /// [`build`]: #method.build
 pub struct LoggerBuilder {
-    level: LevelFilter,
-    color: bool,
+    config: LoggerConfig,
 }
 
 impl Default for LoggerBuilder {
@@ -71,28 +96,26 @@ impl LoggerBuilder {
     /// Creates a builder with the default level of [`LevelFilter::Info`] and color disabled.
     pub fn new() -> Self {
         Self {
-            level: LevelFilter::Info,
-            color: false,
+            config: LoggerConfig::default(),
         }
     }
 
     /// Sets the minimum log level. Returns `self` for chaining.
     pub fn level(mut self, level: LevelFilter) -> Self {
-        self.level = level;
+        self.config.level = level;
         self
     }
 
     /// Enables or disables colorized output. Returns `self` for chaining.
     pub fn color(mut self, color: bool) -> Self {
-        self.color = color;
+        self.config.color = color;
         self
     }
 
     /// Consumes the builder and returns a [`Logger`] carrying the configured options.
     pub fn build(self) -> Logger {
         Logger {
-            level: self.level,
-            color: self.color,
+            config: self.config,
             initialized: AtomicBool::new(false),
         }
     }
@@ -131,8 +154,7 @@ impl LoggerBuilder {
 /// [`init`]: Logger::init
 #[must_use = "call .init() to enable logging"]
 pub struct Logger {
-    level: LevelFilter,
-    color: bool,
+    config: LoggerConfig,
     initialized: AtomicBool,
 }
 
@@ -162,10 +184,10 @@ impl Logger {
         }
 
         let start = std::time::Instant::now();
-        let color_enabled = self.color;
+        let color_enabled = self.config.color;
 
         let mut builder = env_logger::Builder::new();
-        builder.filter_level(self.level);
+        builder.filter_level(self.config.level);
 
         builder.format(move |buf, record| {
             let elapsed = start.elapsed().as_millis();
