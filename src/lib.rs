@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
 
@@ -161,37 +162,28 @@ impl Logger {
         }
 
         let start = std::time::Instant::now();
-        let color = self.color;
+        let color_enabled = self.color;
 
         let mut builder = env_logger::Builder::new();
         builder.filter_level(self.level);
 
         builder.format(move |buf, record| {
-            use std::io::Write;
-
             let elapsed = start.elapsed().as_millis();
 
-            if color {
+            let line = format!(
+                "[{elapsed:>9} | {:>5} | {} | {}:{} ] {}",
+                record.level(),
+                record.target(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args(),
+            );
+
+            if color_enabled {
                 let style = buf.default_level_style(record.level());
-                writeln!(
-                    buf,
-                    "{style}[{elapsed:>9} | {:>5} | {} | {}:{} ] {}{style:#}",
-                    record.level(),
-                    record.target(),
-                    record.file().unwrap_or("unknown"),
-                    record.line().unwrap_or(0),
-                    record.args(),
-                )
+                writeln!(buf, "{style}{line}{style:#}")
             } else {
-                writeln!(
-                    buf,
-                    "[{elapsed:>9} | {:>5} | {} | {}:{} ] {}",
-                    record.level(),
-                    record.target(),
-                    record.file().unwrap_or("unknown"),
-                    record.line().unwrap_or(0),
-                    record.args(),
-                )
+                writeln!(buf, "{}", line)
             }
         });
 
