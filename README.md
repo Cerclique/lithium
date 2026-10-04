@@ -57,8 +57,17 @@ Set the minimum level via `LoggerBuilder::level(LevelFilter::Level)`. Messages a
 ### stdout
 
 ```text
-[     120 | ERROR | my_crate | src/lib.rs:42 ] something went wrong
+[      120 | ERROR | my_crate | src/lib.rs:42 ] something went wrong
 ```
+
+## Notes
+
+- [`LoggerBuilder::new`][LoggerBuilder] reads no environment variables, so
+  `RUST_LOG` has no effect. The minimum level is set only via [`level`].
+- [`color(true)`][color] does not force color. It resolves through
+  `env_logger`'s terminal detection, so styling is stripped when the output is
+  not a TTY (for example, when piped or redirected). It means "allow color
+  when the terminal supports it".
 
 ## License
 

@@ -1,6 +1,7 @@
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
+
+mod format;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -31,32 +32,6 @@ pub enum LoggerError {
 }
 
 // ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-/// Configuration options for a [`Logger`].
-///
-/// Holds the settings chosen at build time: log level and color output.
-/// Created by [`LoggerBuilder`] and carried into [`Logger`].
-///
-/// [`Logger`]: struct.Logger.html
-/// [`LoggerBuilder`]: struct.LoggerBuilder.html
-#[derive(Clone)]
-struct LoggerConfig {
-    level: LevelFilter,
-    color: bool,
-}
-
-impl Default for LoggerConfig {
-    fn default() -> Self {
-        Self {
-            level: LevelFilter::Info,
-            color: false,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Builder
 // ---------------------------------------------------------------------------
 
@@ -84,7 +59,8 @@ impl Default for LoggerConfig {
 /// [`color`]: #method.color
 /// [`build`]: #method.build
 pub struct LoggerBuilder {
-    config: LoggerConfig,
+    level: LevelFilter,
+    color: bool,
 }
 
 impl Default for LoggerBuilder {
@@ -94,29 +70,33 @@ impl Default for LoggerBuilder {
 }
 
 impl LoggerBuilder {
-    /// Creates a builder with the default level of [`LevelFilter::Info`] and color disabled.
+    /// Creates a builder with the default level of [`LevelFilter::Info`] and
+    /// color disabled.
     pub fn new() -> Self {
         Self {
-            config: LoggerConfig::default(),
+            level: LevelFilter::Info,
+            color: false,
         }
     }
 
     /// Sets the minimum log level. Returns `self` for chaining.
     pub fn level(mut self, level: LevelFilter) -> Self {
-        self.config.level = level;
+        self.level = level;
         self
     }
 
     /// Enables or disables colorized output. Returns `self` for chaining.
     pub fn color(mut self, color: bool) -> Self {
-        self.config.color = color;
+        self.color = color;
         self
     }
 
-    /// Consumes the builder and returns a [`Logger`] carrying the configured options.
+    /// Consumes the builder and returns a [`Logger`] carrying the configured
+    /// options.
     pub fn build(self) -> Logger {
         Logger {
-            config: self.config,
+            level: self.level,
+            color: self.color,
             initialized: AtomicBool::new(false),
         }
     }
@@ -137,7 +117,7 @@ impl LoggerBuilder {
 /// # stdout format
 ///
 /// ```text
-/// [     120 | ERROR | my_crate | src/lib.rs:42 ] something went wrong
+/// [      120 | ERROR | my_crate | src/lib.rs:42 ] something went wrong
 /// ```
 ///
 /// # Example
@@ -155,13 +135,15 @@ impl LoggerBuilder {
 /// [`init`]: Logger::init
 #[must_use = "call .init() to enable logging"]
 pub struct Logger {
-    config: LoggerConfig,
+    level: LevelFilter,
+    color: bool,
     initialized: AtomicBool,
 }
 
 impl Logger {
     /// Initializes the logger with a custom formatter that includes elapsed time,
-    /// log level, target, file, and line number.
+    /// log level, target, file, and line number. Elapsed time on each formatted
+    /// line is measured from the moment this method runs.
     ///
     /// The minimum log level is determined by [`LoggerBuilder::level()`],
     /// defaulting to [`LevelFilter::Info`].
@@ -185,31 +167,11 @@ impl Logger {
             return Err(LoggerError::AlreadyInitialized);
         }
 
-        let start = std::time::Instant::now();
-        let color_enabled = self.config.color;
+        let formatter = format::LineFormatter::new(self.color);
 
         let mut builder = env_logger::Builder::new();
-        builder.filter_level(self.config.level);
-
-        builder.format(move |buf, record| {
-            let elapsed = start.elapsed().as_millis();
-
-            let line = format!(
-                "[{elapsed:>9} | {:>5} | {} | {}:{} ] {}",
-                record.level(),
-                record.target(),
-                record.file().unwrap_or("unknown"),
-                record.line().unwrap_or(0),
-                record.args(),
-            );
-
-            if color_enabled {
-                let style = buf.default_level_style(record.level());
-                writeln!(buf, "{style}{line}{style:#}")
-            } else {
-                writeln!(buf, "{}", line)
-            }
-        });
+        builder.filter_level(self.level);
+        builder.format(move |buf, record| formatter.format(buf, record));
 
         if let Err(err) = builder.try_init() {
             // The global initialization failed; release the claim so the
